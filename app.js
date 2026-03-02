@@ -231,22 +231,6 @@ function drawWarpedPortrait() {
   const dst = warpedKeypoints;
   const s   = pr.scale;
 
-  // Draw the original portrait clipped to a head-shaped ellipse
-  // so hair, ears, and neck are visible behind the warped face mesh
-  const faceBox = boundingBox(portraitKeypoints);
-  const cx = pr.x + (faceBox.x + faceBox.w / 2) * s;
-  const cy = pr.y + (faceBox.y + faceBox.h / 2) * s;
-  const rx = faceBox.w * s * 0.85;
-  const ry = faceBox.h * s * 0.95;
-
-  ctx.save();
-  ctx.beginPath();
-  ctx.ellipse(cx, cy - ry * 0.12, rx, ry, 0, 0, Math.PI * 2);
-  ctx.clip();
-  ctx.drawImage(portraitImg, pr.x, pr.y, pr.w, pr.h);
-  ctx.restore();
-
-  // Draw warped face mesh triangles on top
   for (let i = 0; i < TRIANGULATION.length; i += 3) {
     const i0 = TRIANGULATION[i];
     const i1 = TRIANGULATION[i + 1];
