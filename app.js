@@ -187,7 +187,6 @@ function finishCalibration() {
   warpedKeypoints = portraitKeypoints.map(kp => ({ x: kp.x, y: kp.y }));
 
   calibrateScreen.classList.add('hidden');
-  camPreview.classList.remove('hidden');
   controls.classList.remove('hidden');
   state = 'playing';
 }
@@ -271,6 +270,20 @@ function drawTexturedTriangle(u0, v0, u1, v1, u2, v2, x0, y0, x1, y1, x2, y2) {
   ctx.restore();
 }
 
+// ── Draw webcam background (mirrored, cover) ─
+function drawWebcam() {
+  const cw = canvas.width, ch = canvas.height;
+  const vw = webcamEl.videoWidth || 640, vh = webcamEl.videoHeight || 480;
+  const scale = Math.max(cw / vw, ch / vh);
+  const sw = vw * scale, sh = vh * scale;
+
+  ctx.save();
+  ctx.translate(cw, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(webcamEl, (cw - sw) / 2, (ch - sh) / 2, sw, sh);
+  ctx.restore();
+}
+
 // ── Main draw loop ──────────────────────────
 function draw() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -280,39 +293,24 @@ function draw() {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   if (state === 'playing' && portraitImg && warpedKeypoints) {
+    drawWebcam();
     updateWarp();
     drawWarpedPortrait();
-    drawFrame();
-  } else if ((state === 'detecting' || state === 'calibrating') && portraitImg) {
-    ctx.globalAlpha = state === 'detecting' ? 0.6 : 0.5;
+  } else if (state === 'calibrating') {
+    drawWebcam();
+  } else if (state === 'detecting' && portraitImg) {
+    ctx.globalAlpha = 0.6;
     ctx.drawImage(portraitImg, pr.x, pr.y, pr.w, pr.h);
     ctx.globalAlpha = 1;
-    drawFrame();
-
-    if (state === 'detecting') {
-      ctx.fillStyle = 'rgba(10,10,26,0.55)';
-      ctx.fillRect(pr.x, pr.y, pr.w, pr.h);
-      ctx.fillStyle = '#d4a574';
-      ctx.font = '500 18px Inter, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('Detecting face…', canvas.width / 2, canvas.height / 2);
-    }
+    ctx.fillStyle = 'rgba(10,10,26,0.55)';
+    ctx.fillRect(pr.x, pr.y, pr.w, pr.h);
+    ctx.fillStyle = '#d4a574';
+    ctx.font = '500 18px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Detecting face…', canvas.width / 2, canvas.height / 2);
   }
 
   requestAnimationFrame(draw);
-}
-
-// ── Decorative frame ────────────────────────
-function drawFrame() {
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  const pad = 8;
-  ctx.strokeStyle = 'rgba(212,165,116,0.25)';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(pr.x - pad, pr.y - pad, pr.w + pad * 2, pr.h + pad * 2);
-
-  ctx.strokeStyle = 'rgba(212,165,116,0.1)';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(pr.x - pad - 5, pr.y - pad - 5, pr.w + pad * 2 + 10, pr.h + pad * 2 + 10);
 }
 
 // ── Reset ───────────────────────────────────
