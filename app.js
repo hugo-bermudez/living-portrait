@@ -23,6 +23,7 @@ const loader      = document.getElementById('loader');
 
 // ── State ───────────────────────────────────
 let faceMesh;
+let portraitFaceMesh;
 let portraitImg       = null;
 let portraitKeypoints = null;
 let neutralKeypoints  = null;
@@ -40,10 +41,18 @@ async function init() {
   resizeCanvas();
   window.addEventListener('resize', resizeCanvas);
 
-  // Wait for FaceMesh model to actually finish loading
-  faceMesh = await new Promise(resolve => {
-    const fm = ml5.faceMesh({ maxFaces: 1, refineLandmarks: true, flipped: true }, () => resolve(fm));
-  });
+  // Load both FaceMesh models in parallel:
+  // one flipped for the webcam, one unflipped for portrait images
+  const [webcamFM, portraitFM] = await Promise.all([
+    new Promise(resolve => {
+      const fm = ml5.faceMesh({ maxFaces: 1, refineLandmarks: true, flipped: true }, () => resolve(fm));
+    }),
+    new Promise(resolve => {
+      const fm = ml5.faceMesh({ maxFaces: 1, refineLandmarks: true, flipped: false }, () => resolve(fm));
+    }),
+  ]);
+  faceMesh = webcamFM;
+  portraitFaceMesh = portraitFM;
 
   try {
     await startWebcam();
@@ -52,6 +61,9 @@ async function init() {
     loader.querySelector('p').textContent = 'Webcam access is required. Please allow camera access and reload.';
     return;
   }
+
+  // Start continuous webcam face detection immediately
+  faceMesh.detectStart(webcamEl, onWebcamFace);
 
   loader.classList.add('hidden');
   state = 'upload';
@@ -73,6 +85,8 @@ async function startWebcam() {
     video: { width: 640, height: 480, facingMode: 'user' }
   });
   webcamEl.srcObject = stream;
+  webcamEl.setAttribute('width', 640);
+  webcamEl.setAttribute('height', 480);
   await webcamEl.play();
 }
 
@@ -100,7 +114,6 @@ function loadPortrait(file) {
       portraitImg = img;
       computePortraitRect();
 
-      // Show portrait immediately with detecting state
       uploadScreen.classList.add('hidden');
       state = 'detecting';
       detectPortraitFace();
@@ -129,32 +142,26 @@ function detectPortraitFace() {
   const octx = offscreen.getContext('2d');
   octx.drawImage(portraitImg, 0, 0);
 
-  // Reuse the already-loaded FaceMesh model (has flipped:true, so we un-flip x)
-  faceMesh.detect(offscreen, (results) => {
+  // Use the dedicated unflipped model for the portrait
+  portraitFaceMesh.detect(offscreen, (results) => {
     if (!results || results.length === 0) {
       alert('No face detected in the portrait. Please try a clearer front-facing photo.');
       state = 'upload';
       uploadScreen.classList.remove('hidden');
       return;
     }
-    const imgW = portraitImg.width;
-    portraitKeypoints = results[0].keypoints.map(kp => ({
-      x: imgW - kp.x,
-      y: kp.y,
-    }));
+    portraitKeypoints = results[0].keypoints.map(kp => ({ x: kp.x, y: kp.y }));
     startCalibration();
   });
 }
 
 // ── Calibration ─────────────────────────────
 function startCalibration() {
-  uploadScreen.classList.add('hidden');
   calibrateScreen.classList.remove('hidden');
   state = 'calibrating';
   calibrateCount   = 0;
   calibrateSamples = [];
-
-  faceMesh.detectStart(webcamEl, onWebcamFace);
+  // Webcam detectStart is already running from init()
 }
 
 function onWebcamFace(results) {
@@ -171,14 +178,12 @@ function onWebcamFace(results) {
 }
 
 function finishCalibration() {
-  // Average all samples for a stable neutral pose
   const n = calibrateSamples.length;
   neutralKeypoints = calibrateSamples[0].map((_, i) => ({
     x: calibrateSamples.reduce((s, f) => s + f[i].x, 0) / n,
     y: calibrateSamples.reduce((s, f) => s + f[i].y, 0) / n,
   }));
 
-  // Initialize warped keypoints
   warpedKeypoints = portraitKeypoints.map(kp => ({ x: kp.x, y: kp.y }));
 
   calibrateScreen.classList.add('hidden');
@@ -191,7 +196,6 @@ function finishCalibration() {
 function updateWarp() {
   if (!currentKeypoints || !neutralKeypoints || !portraitKeypoints) return;
 
-  // Compute bounding boxes for normalization
   const nBox = boundingBox(neutralKeypoints);
   const pBox = boundingBox(portraitKeypoints);
 
@@ -223,7 +227,6 @@ function boundingBox(kps) {
 
 // ── Triangle rendering ──────────────────────
 function drawWarpedPortrait() {
-  // Draw original image as background
   ctx.drawImage(portraitImg, pr.x, pr.y, pr.w, pr.h);
 
   const src = portraitKeypoints;
@@ -275,7 +278,6 @@ function draw() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Dark background
   ctx.fillStyle = '#0a0a1a';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -317,7 +319,6 @@ function drawFrame() {
 
 // ── Reset ───────────────────────────────────
 function resetToUpload() {
-  try { faceMesh.detectStop(); } catch (_) {}
   portraitImg       = null;
   portraitKeypoints = null;
   neutralKeypoints  = null;
@@ -330,7 +331,6 @@ function resetToUpload() {
   controls.classList.add('hidden');
   calibrateScreen.classList.add('hidden');
   uploadScreen.classList.remove('hidden');
-  uploadScreen.querySelector('.drop-label').textContent = 'Drop a portrait here or click to upload';
   fileInput.value = '';
   state = 'upload';
 }
