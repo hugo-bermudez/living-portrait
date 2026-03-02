@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Living Portrait – Bring Photos to Life</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='28' font-size='28'>🎭</text></svg>">
+  <title>Face Swap – Living Portrait</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='28' font-size='28'>🤪</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;700;900&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -16,27 +16,31 @@
   <div id="loader">
     <div class="loader-inner">
       <div class="spinner"></div>
-      <p>Loading face mesh model…</p>
+      <p>Loading face magic…</p>
     </div>
   </div>
 
   <!-- Upload screen -->
   <div id="upload-screen" class="screen">
-    <h1>Living Portrait</h1>
-    <p class="subtitle">Upload a portrait and bring it to life with your expressions</p>
+    <div class="title-row">
+      <span class="title-emoji">🤪</span>
+      <h1>Face Swap</h1>
+      <span class="title-emoji flip">🤪</span>
+    </div>
+    <p class="subtitle">Become anyone! Upload a face and watch the magic happen</p>
 
     <label id="drop-zone" for="file-input">
-      <div class="drop-icon">🎭</div>
-      <span class="drop-label">Drop a portrait here or click to upload</span>
-      <span class="drop-hint">Works best with a clear, front-facing photo</span>
+      <div class="drop-icon">📸</div>
+      <span class="drop-label">Drop a photo here or tap to choose</span>
+      <span class="drop-hint">Works best with a clear, front-facing face</span>
     </label>
     <input type="file" id="file-input" accept="image/*" hidden>
   </div>
 
-  <!-- Calibration screen -->
+  <!-- Calibration screen (kept for compatibility) -->
   <div id="calibrate-screen" class="screen hidden">
-    <h2>Look straight at the camera</h2>
-    <p class="subtitle">Hold still for a moment while we learn your neutral face</p>
+    <h2>Look at the camera!</h2>
+    <p class="subtitle">Hold still for a sec…</p>
     <div id="calibrate-progress-wrap">
       <div id="calibrate-bar"></div>
     </div>
@@ -52,7 +56,7 @@
 
   <!-- Controls -->
   <div id="controls" class="hidden">
-    <button id="btn-reset">Upload new portrait</button>
+    <button id="btn-reset">🔄 New Face</button>
   </div>
 
   <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>

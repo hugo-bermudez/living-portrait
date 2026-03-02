@@ -230,7 +230,7 @@ function draw() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  ctx.fillStyle = '#0a0a1a';
+  ctx.fillStyle = '#1a0a2e';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   if (state === 'playing' && portraitImg) {
@@ -238,12 +238,12 @@ function draw() {
     drawWarpedPortrait();
   } else if (state === 'detecting') {
     drawWebcam();
-    ctx.fillStyle = 'rgba(10,10,26,0.55)';
+    ctx.fillStyle = 'rgba(26,10,46,0.6)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#d4a574';
-    ctx.font = '500 18px Inter, sans-serif';
+    ctx.fillStyle = '#6bfff0';
+    ctx.font = '800 20px Nunito, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('Detecting face in portrait…', canvas.width / 2, canvas.height / 2);
+    ctx.fillText('🔍 Finding face…', canvas.width / 2, canvas.height / 2);
   }
 
   requestAnimationFrame(draw);
