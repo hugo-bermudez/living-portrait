@@ -126,7 +126,7 @@ function loadPortrait(file) {
 function computePortraitRect() {
   const cw = canvas.width, ch = canvas.height;
   const iw = portraitImg.width, ih = portraitImg.height;
-  const scale = Math.min(cw / iw, ch / ih) * 0.85;
+  const scale = Math.min(cw / iw, ch / ih) * 1.3;
   pr.w = iw * scale;
   pr.h = ih * scale;
   pr.x = (cw - pr.w) / 2;
@@ -227,8 +227,6 @@ function boundingBox(kps) {
 
 // ── Triangle rendering ──────────────────────
 function drawWarpedPortrait() {
-  ctx.drawImage(portraitImg, pr.x, pr.y, pr.w, pr.h);
-
   const src = portraitKeypoints;
   const dst = warpedKeypoints;
   const s   = pr.scale;
