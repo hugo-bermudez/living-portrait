@@ -3,9 +3,7 @@
 //  ml5.js FaceMesh + canvas triangle warping
 // ─────────────────────────────────────────────
 
-const CALIBRATE_FRAMES = 40;
-const MOTION_SCALE     = 1.4;
-const LERP_SPEED       = 0.35;
+const LERP_SPEED = 0.4;
 
 // ── DOM ─────────────────────────────────────
 const canvas      = document.getElementById('canvas');
@@ -15,7 +13,6 @@ const fileInput   = document.getElementById('file-input');
 const dropZone    = document.getElementById('drop-zone');
 const uploadScreen    = document.getElementById('upload-screen');
 const calibrateScreen = document.getElementById('calibrate-screen');
-const calibrateBar    = document.getElementById('calibrate-bar');
 const camPreview  = document.getElementById('cam-preview');
 const controls    = document.getElementById('controls');
 const btnReset    = document.getElementById('btn-reset');
@@ -26,23 +23,15 @@ let faceMesh;
 let portraitFaceMesh;
 let portraitImg       = null;
 let portraitKeypoints = null;
-let neutralKeypoints  = null;
 let currentKeypoints  = null;
-let warpedKeypoints   = null;
-let calibrateCount    = 0;
-let calibrateSamples  = [];
-let state             = 'loading'; // loading, upload, detecting, calibrating, playing
-
-// Display rect for portrait (centered, fitted)
-let pr = { x: 0, y: 0, w: 0, h: 0, scale: 1 };
+let smoothedCanvasKps = null;
+let state             = 'loading'; // loading, upload, detecting, playing
 
 // ── Init ────────────────────────────────────
 async function init() {
   resizeCanvas();
   window.addEventListener('resize', resizeCanvas);
 
-  // Load both FaceMesh models in parallel:
-  // one flipped for the webcam, one unflipped for portrait images
   const [webcamFM, portraitFM] = await Promise.all([
     new Promise(resolve => {
       const fm = ml5.faceMesh({ maxFaces: 1, refineLandmarks: true, flipped: true }, () => resolve(fm));
@@ -62,7 +51,6 @@ async function init() {
     return;
   }
 
-  // Start continuous webcam face detection immediately
   faceMesh.detectStart(webcamEl, onWebcamFace);
 
   loader.classList.add('hidden');
@@ -76,7 +64,6 @@ async function init() {
 function resizeCanvas() {
   canvas.width  = window.innerWidth;
   canvas.height = window.innerHeight;
-  if (portraitImg) computePortraitRect();
 }
 
 // ── Webcam ──────────────────────────────────
@@ -112,8 +99,6 @@ function loadPortrait(file) {
     const img = new Image();
     img.onload = () => {
       portraitImg = img;
-      computePortraitRect();
-
       uploadScreen.classList.add('hidden');
       state = 'detecting';
       detectPortraitFace();
@@ -121,17 +106,6 @@ function loadPortrait(file) {
     img.src = e.target.result;
   };
   reader.readAsDataURL(file);
-}
-
-function computePortraitRect() {
-  const cw = canvas.width, ch = canvas.height;
-  const iw = portraitImg.width, ih = portraitImg.height;
-  const scale = Math.min(cw / iw, ch / ih) * 1.3;
-  pr.w = iw * scale;
-  pr.h = ih * scale;
-  pr.x = (cw - pr.w) / 2;
-  pr.y = (ch - pr.h) / 2;
-  pr.scale = scale;
 }
 
 // ── Face detection on portrait ──────────────
@@ -142,7 +116,6 @@ function detectPortraitFace() {
   const octx = offscreen.getContext('2d');
   octx.drawImage(portraitImg, 0, 0);
 
-  // Use the dedicated unflipped model for the portrait
   portraitFaceMesh.detect(offscreen, (results) => {
     if (!results || results.length === 0) {
       alert('No face detected in the portrait. Please try a clearer front-facing photo.');
@@ -151,97 +124,65 @@ function detectPortraitFace() {
       return;
     }
     portraitKeypoints = results[0].keypoints.map(kp => ({ x: kp.x, y: kp.y }));
-    startCalibration();
+    smoothedCanvasKps = null;
+    controls.classList.remove('hidden');
+    state = 'playing';
   });
 }
 
-// ── Calibration ─────────────────────────────
-function startCalibration() {
-  calibrateScreen.classList.remove('hidden');
-  state = 'calibrating';
-  calibrateCount   = 0;
-  calibrateSamples = [];
-  // Webcam detectStart is already running from init()
-}
-
+// ── Webcam face tracking ────────────────────
 function onWebcamFace(results) {
   if (!results || results.length === 0) return;
   currentKeypoints = results[0].keypoints.map(kp => ({ x: kp.x, y: kp.y }));
-
-  if (state === 'calibrating') {
-    calibrateSamples.push(currentKeypoints);
-    calibrateCount++;
-    calibrateBar.style.width = Math.min(100, (calibrateCount / CALIBRATE_FRAMES) * 100) + '%';
-
-    if (calibrateCount >= CALIBRATE_FRAMES) finishCalibration();
-  }
 }
 
-function finishCalibration() {
-  const n = calibrateSamples.length;
-  neutralKeypoints = calibrateSamples[0].map((_, i) => ({
-    x: calibrateSamples.reduce((s, f) => s + f[i].x, 0) / n,
-    y: calibrateSamples.reduce((s, f) => s + f[i].y, 0) / n,
-  }));
-
-  warpedKeypoints = portraitKeypoints.map(kp => ({ x: kp.x, y: kp.y }));
-
-  calibrateScreen.classList.add('hidden');
-  controls.classList.remove('hidden');
-  state = 'playing';
-}
-
-// ── Motion mapping ──────────────────────────
-function updateWarp() {
-  if (!currentKeypoints || !neutralKeypoints || !portraitKeypoints) return;
-
-  const nBox = boundingBox(neutralKeypoints);
-  const pBox = boundingBox(portraitKeypoints);
-
-  const scaleX = pBox.w / nBox.w;
-  const scaleY = pBox.h / nBox.h;
-
-  for (let i = 0; i < portraitKeypoints.length && i < currentKeypoints.length; i++) {
-    const dx = (currentKeypoints[i].x - neutralKeypoints[i].x) * scaleX * MOTION_SCALE;
-    const dy = (currentKeypoints[i].y - neutralKeypoints[i].y) * scaleY * MOTION_SCALE;
-
-    const targetX = portraitKeypoints[i].x + dx;
-    const targetY = portraitKeypoints[i].y + dy;
-
-    warpedKeypoints[i].x += (targetX - warpedKeypoints[i].x) * LERP_SPEED;
-    warpedKeypoints[i].y += (targetY - warpedKeypoints[i].y) * LERP_SPEED;
-  }
-}
-
-function boundingBox(kps) {
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const kp of kps) {
-    if (kp.x < minX) minX = kp.x;
-    if (kp.y < minY) minY = kp.y;
-    if (kp.x > maxX) maxX = kp.x;
-    if (kp.y > maxY) maxY = kp.y;
-  }
-  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+// ── Map webcam keypoint to canvas coordinates ─
+function webcamToCanvas(kp) {
+  const cw = canvas.width, ch = canvas.height;
+  const vw = webcamEl.videoWidth || 640, vh = webcamEl.videoHeight || 480;
+  const s = Math.max(cw / vw, ch / vh);
+  const ox = (cw - vw * s) / 2;
+  const oy = (ch - vh * s) / 2;
+  return { x: ox + kp.x * s, y: oy + kp.y * s };
 }
 
 // ── Triangle rendering ──────────────────────
 function drawWarpedPortrait() {
+  if (!currentKeypoints || !portraitKeypoints) return;
+
   const src = portraitKeypoints;
-  const dst = warpedKeypoints;
-  const s   = pr.scale;
+  const n = Math.min(src.length, currentKeypoints.length);
+
+  // Compute destination points from webcam keypoints mapped to canvas
+  const destKps = new Array(n);
+  for (let i = 0; i < n; i++) {
+    destKps[i] = webcamToCanvas(currentKeypoints[i]);
+  }
+
+  // Smooth the destination points to reduce jitter
+  if (!smoothedCanvasKps) {
+    smoothedCanvasKps = destKps.map(p => ({ x: p.x, y: p.y }));
+  } else {
+    for (let i = 0; i < n; i++) {
+      smoothedCanvasKps[i].x += (destKps[i].x - smoothedCanvasKps[i].x) * LERP_SPEED;
+      smoothedCanvasKps[i].y += (destKps[i].y - smoothedCanvasKps[i].y) * LERP_SPEED;
+    }
+  }
 
   for (let i = 0; i < TRIANGULATION.length; i += 3) {
     const i0 = TRIANGULATION[i];
     const i1 = TRIANGULATION[i + 1];
     const i2 = TRIANGULATION[i + 2];
 
-    if (i0 >= src.length || i1 >= src.length || i2 >= src.length) continue;
+    if (i0 >= n || i1 >= n || i2 >= n) continue;
+
+    const d0 = smoothedCanvasKps[i0];
+    const d1 = smoothedCanvasKps[i1];
+    const d2 = smoothedCanvasKps[i2];
 
     drawTexturedTriangle(
       src[i0].x, src[i0].y, src[i1].x, src[i1].y, src[i2].x, src[i2].y,
-      pr.x + dst[i0].x * s, pr.y + dst[i0].y * s,
-      pr.x + dst[i1].x * s, pr.y + dst[i1].y * s,
-      pr.x + dst[i2].x * s, pr.y + dst[i2].y * s
+      d0.x, d0.y, d1.x, d1.y, d2.x, d2.y
     );
   }
 }
@@ -292,22 +233,17 @@ function draw() {
   ctx.fillStyle = '#0a0a1a';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  if (state === 'playing' && portraitImg && warpedKeypoints) {
+  if (state === 'playing' && portraitImg) {
     drawWebcam();
-    updateWarp();
     drawWarpedPortrait();
-  } else if (state === 'calibrating') {
+  } else if (state === 'detecting') {
     drawWebcam();
-  } else if (state === 'detecting' && portraitImg) {
-    ctx.globalAlpha = 0.6;
-    ctx.drawImage(portraitImg, pr.x, pr.y, pr.w, pr.h);
-    ctx.globalAlpha = 1;
     ctx.fillStyle = 'rgba(10,10,26,0.55)';
-    ctx.fillRect(pr.x, pr.y, pr.w, pr.h);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#d4a574';
     ctx.font = '500 18px Inter, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('Detecting face…', canvas.width / 2, canvas.height / 2);
+    ctx.fillText('Detecting face in portrait…', canvas.width / 2, canvas.height / 2);
   }
 
   requestAnimationFrame(draw);
@@ -317,13 +253,9 @@ function draw() {
 function resetToUpload() {
   portraitImg       = null;
   portraitKeypoints = null;
-  neutralKeypoints  = null;
   currentKeypoints  = null;
-  warpedKeypoints   = null;
-  calibrateCount    = 0;
-  calibrateSamples  = [];
+  smoothedCanvasKps = null;
 
-  camPreview.classList.add('hidden');
   controls.classList.add('hidden');
   calibrateScreen.classList.add('hidden');
   uploadScreen.classList.remove('hidden');
