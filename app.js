@@ -5,7 +5,7 @@
 // ─────────────────────────────────────────────
 
 const LERP_SPEED  = 0.4;
-const FEATHER_PX  = 18;
+const FEATHER_PX  = 8;
 
 // MediaPipe face oval indices (traces face outline)
 const FACE_OVAL = [
@@ -43,6 +43,7 @@ let state             = 'loading';
 // Color correction multipliers
 let colorCorrection = { r: 1, g: 1, b: 1 };
 let colorCorrectionReady = false;
+let portraitIsGrayscale = false;
 
 // ── Init ────────────────────────────────────
 async function init() {
@@ -185,9 +186,9 @@ function computePortraitSkinColor() {
   const tmpCtx = tmpC.getContext('2d');
   tmpCtx.drawImage(portraitImg, 0, 0);
 
-  // Sample skin color from nose/cheek area (keypoints around nose bridge + cheeks)
   const sampleIndices = [1, 2, 4, 5, 6, 45, 51, 275, 281, 195, 197];
   let rSum = 0, gSum = 0, bSum = 0, count = 0;
+  let maxChromaDiff = 0;
 
   for (const idx of sampleIndices) {
     if (idx >= portraitKeypoints.length) continue;
@@ -196,6 +197,8 @@ function computePortraitSkinColor() {
     if (px < 0 || py < 0 || px >= tmpC.width || py >= tmpC.height) continue;
     const data = tmpCtx.getImageData(px, py, 1, 1).data;
     rSum += data[0]; gSum += data[1]; bSum += data[2]; count++;
+    const diff = Math.max(Math.abs(data[0] - data[1]), Math.abs(data[1] - data[2]), Math.abs(data[0] - data[2]));
+    if (diff > maxChromaDiff) maxChromaDiff = diff;
   }
 
   if (count > 0) {
@@ -203,6 +206,8 @@ function computePortraitSkinColor() {
     colorCorrection._pg = gSum / count;
     colorCorrection._pb = bSum / count;
     colorCorrectionReady = true;
+    // If max channel difference across all samples is tiny, portrait is grayscale
+    portraitIsGrayscale = maxChromaDiff < 20;
   }
 }
 
@@ -305,8 +310,21 @@ function drawWarpedPortrait() {
     }
   }
 
-  // 3. Create soft feathered mask from face silhouette
+  // 3. Create soft feathered mask from face silhouette (shrunk inward)
   maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+
+  // Compute face center from oval points
+  let cx = 0, cy = 0, ovalCount = 0;
+  for (const idx of FACE_OVAL) {
+    if (idx >= n) continue;
+    cx += smoothedCanvasKps[idx].x;
+    cy += smoothedCanvasKps[idx].y;
+    ovalCount++;
+  }
+  cx /= ovalCount; cy /= ovalCount;
+
+  // Draw the polygon shrunk 6% inward toward center to prevent outward glow
+  const shrink = 0.94;
   maskCtx.save();
   maskCtx.filter = `blur(${FEATHER_PX}px)`;
   maskCtx.fillStyle = '#fff';
@@ -316,8 +334,10 @@ function drawWarpedPortrait() {
   for (const idx of FACE_OVAL) {
     if (idx >= n) continue;
     const p = smoothedCanvasKps[idx];
-    if (first) { maskCtx.moveTo(p.x, p.y); first = false; }
-    else maskCtx.lineTo(p.x, p.y);
+    const sx = cx + (p.x - cx) * shrink;
+    const sy = cy + (p.y - cy) * shrink;
+    if (first) { maskCtx.moveTo(sx, sy); first = false; }
+    else maskCtx.lineTo(sx, sy);
   }
   maskCtx.closePath();
   maskCtx.fill();
@@ -364,6 +384,7 @@ function drawWebcam() {
   const sw = vw * scale, sh = vh * scale;
 
   ctx.save();
+  if (portraitIsGrayscale) ctx.filter = 'grayscale(1)';
   ctx.translate(cw, 0);
   ctx.scale(-1, 1);
   ctx.drawImage(webcamEl, (cw - sw) / 2, (ch - sh) / 2, sw, sh);
@@ -402,6 +423,7 @@ function resetToUpload() {
   smoothedCanvasKps = null;
   colorCorrectionReady = false;
   colorCorrection = { r: 1, g: 1, b: 1 };
+  portraitIsGrayscale = false;
 
   controls.classList.add('hidden');
   calibrateScreen.classList.add('hidden');
