@@ -40,9 +40,18 @@ async function init() {
   resizeCanvas();
   window.addEventListener('resize', resizeCanvas);
 
-  faceMesh = ml5.faceMesh({ maxFaces: 1, refineLandmarks: true, flipped: true });
+  // Wait for FaceMesh model to actually finish loading
+  faceMesh = await new Promise(resolve => {
+    const fm = ml5.faceMesh({ maxFaces: 1, refineLandmarks: true, flipped: true }, () => resolve(fm));
+  });
 
-  await startWebcam();
+  try {
+    await startWebcam();
+  } catch (err) {
+    console.error('Webcam error:', err);
+    loader.querySelector('p').textContent = 'Webcam access is required. Please allow camera access and reload.';
+    return;
+  }
 
   loader.classList.add('hidden');
   state = 'upload';
@@ -110,22 +119,25 @@ function computePortraitRect() {
 
 // ── Face detection on portrait ──────────────
 function detectPortraitFace() {
-  // FaceMesh needs a canvas to detect from
+  uploadScreen.querySelector('.drop-label').textContent = 'Detecting face…';
+
   const offscreen = document.createElement('canvas');
   offscreen.width  = portraitImg.width;
   offscreen.height = portraitImg.height;
   const octx = offscreen.getContext('2d');
   octx.drawImage(portraitImg, 0, 0);
 
-  // ml5.js faceMesh unflipped for the static image
-  const staticFM = ml5.faceMesh({ maxFaces: 1, refineLandmarks: true, flipped: false });
-  staticFM.detect(offscreen, (results) => {
-    if (!results || results.length === 0) {
-      alert('No face detected in the portrait. Please try a clearer front-facing photo.');
-      return;
-    }
-    portraitKeypoints = results[0].keypoints.map(kp => ({ x: kp.x, y: kp.y }));
-    startCalibration();
+  // Create an unflipped FaceMesh and wait for it to be ready before detecting
+  const staticFM = ml5.faceMesh({ maxFaces: 1, refineLandmarks: true, flipped: false }, () => {
+    staticFM.detect(offscreen, (results) => {
+      uploadScreen.querySelector('.drop-label').textContent = 'Drop a portrait here or click to upload';
+      if (!results || results.length === 0) {
+        alert('No face detected in the portrait. Please try a clearer front-facing photo.');
+        return;
+      }
+      portraitKeypoints = results[0].keypoints.map(kp => ({ x: kp.x, y: kp.y }));
+      startCalibration();
+    });
   });
 }
 
