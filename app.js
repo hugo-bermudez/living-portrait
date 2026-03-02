@@ -30,7 +30,7 @@ let currentKeypoints  = null;
 let warpedKeypoints   = null;
 let calibrateCount    = 0;
 let calibrateSamples  = [];
-let state             = 'loading'; // loading, upload, calibrating, playing
+let state             = 'loading'; // loading, upload, detecting, calibrating, playing
 
 // Display rect for portrait (centered, fitted)
 let pr = { x: 0, y: 0, w: 0, h: 0, scale: 1 };
@@ -99,6 +99,10 @@ function loadPortrait(file) {
     img.onload = () => {
       portraitImg = img;
       computePortraitRect();
+
+      // Show portrait immediately with detecting state
+      uploadScreen.classList.add('hidden');
+      state = 'detecting';
       detectPortraitFace();
     };
     img.src = e.target.result;
@@ -119,25 +123,26 @@ function computePortraitRect() {
 
 // ── Face detection on portrait ──────────────
 function detectPortraitFace() {
-  uploadScreen.querySelector('.drop-label').textContent = 'Detecting face…';
-
   const offscreen = document.createElement('canvas');
   offscreen.width  = portraitImg.width;
   offscreen.height = portraitImg.height;
   const octx = offscreen.getContext('2d');
   octx.drawImage(portraitImg, 0, 0);
 
-  // Create an unflipped FaceMesh and wait for it to be ready before detecting
-  const staticFM = ml5.faceMesh({ maxFaces: 1, refineLandmarks: true, flipped: false }, () => {
-    staticFM.detect(offscreen, (results) => {
-      uploadScreen.querySelector('.drop-label').textContent = 'Drop a portrait here or click to upload';
-      if (!results || results.length === 0) {
-        alert('No face detected in the portrait. Please try a clearer front-facing photo.');
-        return;
-      }
-      portraitKeypoints = results[0].keypoints.map(kp => ({ x: kp.x, y: kp.y }));
-      startCalibration();
-    });
+  // Reuse the already-loaded FaceMesh model (has flipped:true, so we un-flip x)
+  faceMesh.detect(offscreen, (results) => {
+    if (!results || results.length === 0) {
+      alert('No face detected in the portrait. Please try a clearer front-facing photo.');
+      state = 'upload';
+      uploadScreen.classList.remove('hidden');
+      return;
+    }
+    const imgW = portraitImg.width;
+    portraitKeypoints = results[0].keypoints.map(kp => ({
+      x: imgW - kp.x,
+      y: kp.y,
+    }));
+    startCalibration();
   });
 }
 
@@ -278,11 +283,20 @@ function draw() {
     updateWarp();
     drawWarpedPortrait();
     drawFrame();
-  } else if (state === 'calibrating' && portraitImg) {
-    // Show static portrait during calibration
-    ctx.globalAlpha = 0.5;
+  } else if ((state === 'detecting' || state === 'calibrating') && portraitImg) {
+    ctx.globalAlpha = state === 'detecting' ? 0.6 : 0.5;
     ctx.drawImage(portraitImg, pr.x, pr.y, pr.w, pr.h);
     ctx.globalAlpha = 1;
+    drawFrame();
+
+    if (state === 'detecting') {
+      ctx.fillStyle = 'rgba(10,10,26,0.55)';
+      ctx.fillRect(pr.x, pr.y, pr.w, pr.h);
+      ctx.fillStyle = '#d4a574';
+      ctx.font = '500 18px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Detecting face…', canvas.width / 2, canvas.height / 2);
+    }
   }
 
   requestAnimationFrame(draw);
@@ -303,7 +317,7 @@ function drawFrame() {
 
 // ── Reset ───────────────────────────────────
 function resetToUpload() {
-  faceMesh.detectStop();
+  try { faceMesh.detectStop(); } catch (_) {}
   portraitImg       = null;
   portraitKeypoints = null;
   neutralKeypoints  = null;
@@ -316,6 +330,7 @@ function resetToUpload() {
   controls.classList.add('hidden');
   calibrateScreen.classList.add('hidden');
   uploadScreen.classList.remove('hidden');
+  uploadScreen.querySelector('.drop-label').textContent = 'Drop a portrait here or click to upload';
   fileInput.value = '';
   state = 'upload';
 }
