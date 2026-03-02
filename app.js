@@ -1,9 +1,18 @@
 // ─────────────────────────────────────────────
-//  Living Portrait – Bring Photos to Life
+//  Face Swap – Living Portrait
 //  ml5.js FaceMesh + canvas triangle warping
+//  with edge feathering & color matching
 // ─────────────────────────────────────────────
 
-const LERP_SPEED = 0.4;
+const LERP_SPEED  = 0.4;
+const FEATHER_PX  = 18;
+
+// MediaPipe face oval indices (traces face outline)
+const FACE_OVAL = [
+  10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288,
+  397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136,
+  172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109
+];
 
 // ── DOM ─────────────────────────────────────
 const canvas      = document.getElementById('canvas');
@@ -18,6 +27,10 @@ const controls    = document.getElementById('controls');
 const btnReset    = document.getElementById('btn-reset');
 const loader      = document.getElementById('loader');
 
+// ── Offscreen canvases (created once, resized with window) ──
+let faceCanvas, faceCtx;
+let maskCanvas, maskCtx;
+
 // ── State ───────────────────────────────────
 let faceMesh;
 let portraitFaceMesh;
@@ -25,7 +38,11 @@ let portraitImg       = null;
 let portraitKeypoints = null;
 let currentKeypoints  = null;
 let smoothedCanvasKps = null;
-let state             = 'loading'; // loading, upload, detecting, playing
+let state             = 'loading';
+
+// Color correction multipliers
+let colorCorrection = { r: 1, g: 1, b: 1 };
+let colorCorrectionReady = false;
 
 // ── Init ────────────────────────────────────
 async function init() {
@@ -64,6 +81,16 @@ async function init() {
 function resizeCanvas() {
   canvas.width  = window.innerWidth;
   canvas.height = window.innerHeight;
+
+  faceCanvas = document.createElement('canvas');
+  faceCanvas.width = canvas.width;
+  faceCanvas.height = canvas.height;
+  faceCtx = faceCanvas.getContext('2d');
+
+  maskCanvas = document.createElement('canvas');
+  maskCanvas.width = canvas.width;
+  maskCanvas.height = canvas.height;
+  maskCtx = maskCanvas.getContext('2d');
 }
 
 // ── Webcam ──────────────────────────────────
@@ -125,6 +152,8 @@ function detectPortraitFace() {
     }
     portraitKeypoints = results[0].keypoints.map(kp => ({ x: kp.x, y: kp.y }));
     smoothedCanvasKps = null;
+    colorCorrectionReady = false;
+    computePortraitSkinColor();
     controls.classList.remove('hidden');
     state = 'playing';
   });
@@ -146,20 +175,89 @@ function webcamToCanvas(kp) {
   return { x: ox + kp.x * s, y: oy + kp.y * s };
 }
 
-// ── Triangle rendering ──────────────────────
+// ── Color matching ──────────────────────────
+function computePortraitSkinColor() {
+  if (!portraitKeypoints || !portraitImg) return;
+
+  const tmpC = document.createElement('canvas');
+  tmpC.width = portraitImg.width;
+  tmpC.height = portraitImg.height;
+  const tmpCtx = tmpC.getContext('2d');
+  tmpCtx.drawImage(portraitImg, 0, 0);
+
+  // Sample skin color from nose/cheek area (keypoints around nose bridge + cheeks)
+  const sampleIndices = [1, 2, 4, 5, 6, 45, 51, 275, 281, 195, 197];
+  let rSum = 0, gSum = 0, bSum = 0, count = 0;
+
+  for (const idx of sampleIndices) {
+    if (idx >= portraitKeypoints.length) continue;
+    const px = Math.round(portraitKeypoints[idx].x);
+    const py = Math.round(portraitKeypoints[idx].y);
+    if (px < 0 || py < 0 || px >= tmpC.width || py >= tmpC.height) continue;
+    const data = tmpCtx.getImageData(px, py, 1, 1).data;
+    rSum += data[0]; gSum += data[1]; bSum += data[2]; count++;
+  }
+
+  if (count > 0) {
+    colorCorrection._pr = rSum / count;
+    colorCorrection._pg = gSum / count;
+    colorCorrection._pb = bSum / count;
+    colorCorrectionReady = true;
+  }
+}
+
+function updateColorCorrection() {
+  if (!colorCorrectionReady || !currentKeypoints) return;
+
+  // Sample webcam skin color from same facial landmarks
+  const tmpC = document.createElement('canvas');
+  const vw = webcamEl.videoWidth || 640, vh = webcamEl.videoHeight || 480;
+  tmpC.width = vw; tmpC.height = vh;
+  const tmpCtx = tmpC.getContext('2d');
+  tmpCtx.drawImage(webcamEl, 0, 0);
+
+  const sampleIndices = [1, 2, 4, 5, 6, 45, 51, 275, 281, 195, 197];
+  let rSum = 0, gSum = 0, bSum = 0, count = 0;
+
+  for (const idx of sampleIndices) {
+    if (idx >= currentKeypoints.length) continue;
+    const px = Math.round(currentKeypoints[idx].x);
+    const py = Math.round(currentKeypoints[idx].y);
+    if (px < 0 || py < 0 || px >= vw || py >= vh) continue;
+    const data = tmpCtx.getImageData(px, py, 1, 1).data;
+    rSum += data[0]; gSum += data[1]; bSum += data[2]; count++;
+  }
+
+  if (count > 0) {
+    const wr = rSum / count, wg = gSum / count, wb = bSum / count;
+    const pr = colorCorrection._pr, pg = colorCorrection._pg, pb = colorCorrection._pb;
+
+    // Blend ratio (don't over-correct)
+    const blend = 0.5;
+    const targetR = pr + (wr - pr) * blend;
+    const targetG = pg + (wg - pg) * blend;
+    const targetB = pb + (wb - pb) * blend;
+
+    colorCorrection.r += ((targetR / Math.max(pr, 1)) - colorCorrection.r) * 0.08;
+    colorCorrection.g += ((targetG / Math.max(pg, 1)) - colorCorrection.g) * 0.08;
+    colorCorrection.b += ((targetB / Math.max(pb, 1)) - colorCorrection.b) * 0.08;
+  }
+}
+
+// ── Triangle rendering with blending ────────
+let colorUpdateTimer = 0;
+
 function drawWarpedPortrait() {
   if (!currentKeypoints || !portraitKeypoints) return;
 
   const src = portraitKeypoints;
   const n = Math.min(src.length, currentKeypoints.length);
 
-  // Compute destination points from webcam keypoints mapped to canvas
   const destKps = new Array(n);
   for (let i = 0; i < n; i++) {
     destKps[i] = webcamToCanvas(currentKeypoints[i]);
   }
 
-  // Smooth the destination points to reduce jitter
   if (!smoothedCanvasKps) {
     smoothedCanvasKps = destKps.map(p => ({ x: p.x, y: p.y }));
   } else {
@@ -169,11 +267,17 @@ function drawWarpedPortrait() {
     }
   }
 
+  // Update color correction periodically (expensive operation)
+  colorUpdateTimer++;
+  if (colorUpdateTimer % 30 === 0) updateColorCorrection();
+
+  // 1. Draw warped face triangles to offscreen canvas
+  faceCtx.clearRect(0, 0, faceCanvas.width, faceCanvas.height);
+
   for (let i = 0; i < TRIANGULATION.length; i += 3) {
     const i0 = TRIANGULATION[i];
     const i1 = TRIANGULATION[i + 1];
     const i2 = TRIANGULATION[i + 2];
-
     if (i0 >= n || i1 >= n || i2 >= n) continue;
 
     const d0 = smoothedCanvasKps[i0];
@@ -181,34 +285,75 @@ function drawWarpedPortrait() {
     const d2 = smoothedCanvasKps[i2];
 
     drawTexturedTriangle(
+      faceCtx,
       src[i0].x, src[i0].y, src[i1].x, src[i1].y, src[i2].x, src[i2].y,
       d0.x, d0.y, d1.x, d1.y, d2.x, d2.y
     );
   }
+
+  // 2. Apply color correction overlay
+  if (colorCorrectionReady) {
+    const cr = colorCorrection.r, cg = colorCorrection.g, cb = colorCorrection.b;
+    if (Math.abs(cr - 1) > 0.02 || Math.abs(cg - 1) > 0.02 || Math.abs(cb - 1) > 0.02) {
+      faceCtx.globalCompositeOperation = 'multiply';
+      const r = Math.round(Math.min(255, cr * 255));
+      const g = Math.round(Math.min(255, cg * 255));
+      const b = Math.round(Math.min(255, cb * 255));
+      faceCtx.fillStyle = `rgb(${r},${g},${b})`;
+      faceCtx.fillRect(0, 0, faceCanvas.width, faceCanvas.height);
+      faceCtx.globalCompositeOperation = 'source-over';
+    }
+  }
+
+  // 3. Create soft feathered mask from face silhouette
+  maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+  maskCtx.save();
+  maskCtx.filter = `blur(${FEATHER_PX}px)`;
+  maskCtx.fillStyle = '#fff';
+  maskCtx.beginPath();
+
+  let first = true;
+  for (const idx of FACE_OVAL) {
+    if (idx >= n) continue;
+    const p = smoothedCanvasKps[idx];
+    if (first) { maskCtx.moveTo(p.x, p.y); first = false; }
+    else maskCtx.lineTo(p.x, p.y);
+  }
+  maskCtx.closePath();
+  maskCtx.fill();
+  maskCtx.restore();
+
+  // 4. Apply mask to face canvas
+  faceCtx.globalCompositeOperation = 'destination-in';
+  faceCtx.drawImage(maskCanvas, 0, 0);
+  faceCtx.globalCompositeOperation = 'source-over';
+
+  // 5. Composite masked face onto main canvas
+  ctx.drawImage(faceCanvas, 0, 0);
 }
 
-function drawTexturedTriangle(u0, v0, u1, v1, u2, v2, x0, y0, x1, y1, x2, y2) {
+function drawTexturedTriangle(c, u0, v0, u1, v1, u2, v2, x0, y0, x1, y1, x2, y2) {
   const denom = u0 * (v1 - v2) + u1 * (v2 - v0) + u2 * (v0 - v1);
   if (Math.abs(denom) < 0.01) return;
 
-  ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(x0, y0);
-  ctx.lineTo(x1, y1);
-  ctx.lineTo(x2, y2);
-  ctx.closePath();
-  ctx.clip();
+  c.save();
+  c.beginPath();
+  c.moveTo(x0, y0);
+  c.lineTo(x1, y1);
+  c.lineTo(x2, y2);
+  c.closePath();
+  c.clip();
 
   const a = (x0 * (v1 - v2) + x1 * (v2 - v0) + x2 * (v0 - v1)) / denom;
   const b = (y0 * (v1 - v2) + y1 * (v2 - v0) + y2 * (v0 - v1)) / denom;
-  const c = (x0 * (u2 - u1) + x1 * (u0 - u2) + x2 * (u1 - u0)) / denom;
+  const cc = (x0 * (u2 - u1) + x1 * (u0 - u2) + x2 * (u1 - u0)) / denom;
   const d = (y0 * (u2 - u1) + y1 * (u0 - u2) + y2 * (u1 - u0)) / denom;
   const e = (x0 * (u1 * v2 - u2 * v1) + x1 * (u2 * v0 - u0 * v2) + x2 * (u0 * v1 - u1 * v0)) / denom;
   const f = (y0 * (u1 * v2 - u2 * v1) + y1 * (u2 * v0 - u0 * v2) + y2 * (u0 * v1 - u1 * v0)) / denom;
 
-  ctx.setTransform(a, b, c, d, e, f);
-  ctx.drawImage(portraitImg, 0, 0);
-  ctx.restore();
+  c.setTransform(a, b, cc, d, e, f);
+  c.drawImage(portraitImg, 0, 0);
+  c.restore();
 }
 
 // ── Draw webcam background (mirrored, cover) ─
@@ -255,6 +400,8 @@ function resetToUpload() {
   portraitKeypoints = null;
   currentKeypoints  = null;
   smoothedCanvasKps = null;
+  colorCorrectionReady = false;
+  colorCorrection = { r: 1, g: 1, b: 1 };
 
   controls.classList.add('hidden');
   calibrateScreen.classList.add('hidden');
