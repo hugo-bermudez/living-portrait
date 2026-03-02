@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Living Portrait – Bring Photos to Life</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><text y='28' font-size='28'>🎭</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;700;900&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Loading overlay -->
+  <div id="loader">
+    <div class="loader-inner">
+      <div class="spinner"></div>
+      <p>Loading face mesh model…</p>
+    </div>
+  </div>
+
+  <!-- Upload screen -->
+  <div id="upload-screen" class="screen">
+    <h1>Living Portrait</h1>
+    <p class="subtitle">Upload a portrait and bring it to life with your expressions</p>
+
+    <label id="drop-zone" for="file-input">
+      <div class="drop-icon">🎭</div>
+      <span class="drop-label">Drop a portrait here or click to upload</span>
+      <span class="drop-hint">Works best with a clear, front-facing photo</span>
+    </label>
+    <input type="file" id="file-input" accept="image/*" hidden>
+  </div>
+
+  <!-- Calibration screen -->
+  <div id="calibrate-screen" class="screen hidden">
+    <h2>Look straight at the camera</h2>
+    <p class="subtitle">Hold still for a moment while we learn your neutral face</p>
+    <div id="calibrate-progress-wrap">
+      <div id="calibrate-bar"></div>
+    </div>
+  </div>
+
+  <!-- Main canvas -->
+  <canvas id="canvas"></canvas>
+
+  <!-- Webcam preview -->
+  <div id="cam-preview" class="hidden">
+    <video id="webcam" autoplay playsinline muted></video>
+  </div>
+
+  <!-- Controls -->
+  <div id="controls" class="hidden">
+    <button id="btn-reset">Upload new portrait</button>
+  </div>
+
+  <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+  <script src="triangulation.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
