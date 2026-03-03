@@ -14,6 +14,12 @@ const FACE_OVAL = [
   172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109
 ];
 
+// Inner lip keypoints — triangles fully inside this set are mouth interior
+const MOUTH_INTERIOR = new Set([
+  78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308,
+  324, 318, 402, 317, 14, 87, 178, 88, 95
+]);
+
 // ── DOM ─────────────────────────────────────
 const canvas      = document.getElementById('canvas');
 const ctx         = canvas.getContext('2d');
@@ -285,6 +291,9 @@ function drawWarpedPortrait() {
     const i2 = TRIANGULATION[i + 2];
     if (i0 >= n || i1 >= n || i2 >= n) continue;
 
+    // Skip mouth interior triangles so webcam shows through
+    if (MOUTH_INTERIOR.has(i0) && MOUTH_INTERIOR.has(i1) && MOUTH_INTERIOR.has(i2)) continue;
+
     const d0 = smoothedCanvasKps[i0];
     const d1 = smoothedCanvasKps[i1];
     const d2 = smoothedCanvasKps[i2];
@@ -296,8 +305,8 @@ function drawWarpedPortrait() {
     );
   }
 
-  // 2. Apply color correction overlay
-  if (colorCorrectionReady) {
+  // 2. Apply color correction overlay (skip for B&W portraits)
+  if (colorCorrectionReady && !portraitIsGrayscale) {
     const cr = colorCorrection.r, cg = colorCorrection.g, cb = colorCorrection.b;
     if (Math.abs(cr - 1) > 0.02 || Math.abs(cg - 1) > 0.02 || Math.abs(cb - 1) > 0.02) {
       faceCtx.globalCompositeOperation = 'multiply';
