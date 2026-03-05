@@ -14,11 +14,11 @@ const FACE_OVAL = [
   172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109
 ];
 
-// Inner lip keypoints — triangles fully inside this set are mouth interior
-const MOUTH_INTERIOR = new Set([
+// Inner lip contour (ordered path tracing the mouth opening)
+const INNER_LIP = [
   78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308,
   324, 318, 402, 317, 14, 87, 178, 88, 95
-]);
+];
 
 // ── DOM ─────────────────────────────────────
 const canvas      = document.getElementById('canvas');
@@ -291,9 +291,6 @@ function drawWarpedPortrait() {
     const i2 = TRIANGULATION[i + 2];
     if (i0 >= n || i1 >= n || i2 >= n) continue;
 
-    // Skip mouth interior triangles so webcam shows through
-    if (MOUTH_INTERIOR.has(i0) && MOUTH_INTERIOR.has(i1) && MOUTH_INTERIOR.has(i2)) continue;
-
     const d0 = smoothedCanvasKps[i0];
     const d1 = smoothedCanvasKps[i1];
     const d2 = smoothedCanvasKps[i2];
@@ -319,7 +316,25 @@ function drawWarpedPortrait() {
     }
   }
 
-  // 3. Create soft feathered mask from face silhouette (shrunk inward)
+  // 3. Cut out mouth interior so webcam shows through
+  faceCtx.save();
+  faceCtx.globalCompositeOperation = 'destination-out';
+  faceCtx.filter = 'blur(1px)';
+  faceCtx.fillStyle = '#fff';
+  faceCtx.beginPath();
+  let lipFirst = true;
+  for (const idx of INNER_LIP) {
+    if (idx >= n) continue;
+    const p = smoothedCanvasKps[idx];
+    if (lipFirst) { faceCtx.moveTo(p.x, p.y); lipFirst = false; }
+    else faceCtx.lineTo(p.x, p.y);
+  }
+  faceCtx.closePath();
+  faceCtx.fill();
+  faceCtx.restore();
+  faceCtx.globalCompositeOperation = 'source-over';
+
+  // 4. Create soft feathered mask from face silhouette (shrunk inward)
   maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
 
   // Compute face center from oval points
@@ -352,12 +367,12 @@ function drawWarpedPortrait() {
   maskCtx.fill();
   maskCtx.restore();
 
-  // 4. Apply mask to face canvas
+  // 5. Apply mask to face canvas
   faceCtx.globalCompositeOperation = 'destination-in';
   faceCtx.drawImage(maskCanvas, 0, 0);
   faceCtx.globalCompositeOperation = 'source-over';
 
-  // 5. Composite masked face onto main canvas
+  // 6. Composite masked face onto main canvas
   ctx.drawImage(faceCanvas, 0, 0);
 }
 
